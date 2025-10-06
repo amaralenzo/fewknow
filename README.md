@@ -1,147 +1,122 @@
-# FewKnow - Post-Earnings Performance Analyzer
+# FewKnow
 
 **"few understand what actually happened since last earnings."**
 
-Analyze post-earnings performance by connecting official guidance, actual events, price movements, and retail sentiment (Reddit) to surface insights you can't get from Yahoo Finance.
+A web application that analyzes post-earnings stock performance by combining financial data, Reddit sentiment, and AI-powered synthesis to surface insights you won't find only on Yahoo Finance.
 
-## Features
+## What It Does
 
-- **Earnings Analysis**: Fetches earnings dates, EPS, revenue, and guidance
-- **Price Performance**: Compares stock performance vs S&P 500 and sector benchmarks
-- **Reddit Sentiment**: Analyzes retail investor discussions from r/wallstreetbets, r/stocks, r/investing
-- **AI-Powered Insights**: Uses Claude (Anthropic) to synthesize data and surface non-obvious patterns
-- **Timeline View**: Shows what happened week-by-week since earnings
+Enter a stock ticker and FewKnow generates an insight report that:
+- Compares price performance against S&P 500 and sector benchmarks
+- Fetches company news articles from the past year (via Finnhub)
+- Analyzes retail investor discussions from Reddit (r/wallstreetbets, r/stocks, r/investing)
+- Uses dual-LLM pipeline to synthesize official narratives vs. community sentiment
+- Identifies gaps between what companies say and what actually happened
+- Provides forward-looking perspective on what to watch next
 
-## What Makes This Different
+## Quick Start
 
-FewKnow surfaces insights you can't get from traditional sources:
-- ✅ Connects expectations vs reality
-- ✅ Explains "why" not just "what"
-- ✅ Identifies what Reddit spotted before Wall Street
-- ✅ Highlights gaps between official narratives and reality
-- ✅ Provides forward-looking perspective
-
-## Setup
-
-### 1. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Set Up API Keys
+### 1. Environment Setup
 
 Create a `.env` file in the project root:
 
 ```bash
-# Required: Anthropic API key for LLM analysis
+# Required
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
 
-# Optional: Reddit API credentials (uses mock data if not provided)
+# Optional (Finnhub for company news and earnings data - falls back gracefully if missing)
+FINNHUB_API_KEY=your_finnhub_api_key_here
+
+# Optional (falls back to minimal report without Reddit data)
 REDDIT_CLIENT_ID=your_reddit_client_id
 REDDIT_CLIENT_SECRET=your_reddit_client_secret
 REDDIT_USER_AGENT=FewKnow/1.0
 ```
 
-**Getting API Keys:**
+Get API keys:
+- **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
+- **Finnhub** (optional): [finnhub.io](https://finnhub.io/) (free tier: 60 calls/min, 1 year historical news)
+- **Reddit**: [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps) (create app → select "script")
 
-- **Anthropic API**: Get from [console.anthropic.com](https://console.anthropic.com/)
-- **Reddit API** (optional): 
-  1. Go to [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps)
-  2. Click "create app"
-  3. Select "script"
-  4. Copy client ID and secret
+### 2. Install Dependencies
 
-### 3. Load Environment Variables
-
-The script will automatically look for a `.env` file. Alternatively, export variables:
-
+**Backend:**
 ```bash
-export ANTHROPIC_API_KEY="your_key"
-export REDDIT_CLIENT_ID="your_id"
-export REDDIT_CLIENT_SECRET="your_secret"
-export REDDIT_USER_AGENT="FewKnow/1.0"
+cd api
+pip install -r requirements.txt
 ```
 
-## Example Output
-
-```
-================================================================================
-📊 FEWKNOW INSIGHT REPORT
-================================================================================
-
-🎯 NVDA: Strong Beat Masked Underlying Weakness - Reddit Spotted It First
-
---------------------------------------------------------------------------------
-
-📖 THE STORY
---------------------------------------------------------------------------------
-On the surface, NVDA's latest earnings looked like a home run: 10% EPS beat, 
-guidance raised, and an immediate stock rally of 15%. The official narrative 
-was simple - strong execution, growing demand, bright future ahead...
-
---------------------------------------------------------------------------------
-
-💬 RETAIL PERSPECTIVE
---------------------------------------------------------------------------------
-Reddit's analysis was surprisingly sophisticated and ahead of the curve. While 
-r/wallstreetbets had the expected 'moon mission' posts immediately after 
-earnings, the most upvoted comments were actually skeptical...
-
---------------------------------------------------------------------------------
-
-🔍 THE GAP
---------------------------------------------------------------------------------
-The most striking gap is between what the company emphasized (strong beat, 
-raised guidance) and what actually mattered (quality of revenue growth, margin 
-trends, regulatory risks)...
-
---------------------------------------------------------------------------------
-
-🔮 WHAT'S NEXT
---------------------------------------------------------------------------------
-Three things to watch before next earnings:
-1. Regulatory developments - Any news about restrictions...
-2. Margin trends - If next quarter shows continued compression...
-3. Insider trading activity - More selling would confirm bearish thesis...
+**Frontend:**
+```bash
+cd web
+npm install
 ```
 
-## How It Works
+### 3. Run the Application
 
-### Data Flow
+**Start backend** (from `api/` directory):
+```bash
+uvicorn server:app --reload --port 8000
+```
 
-1. **Validate Ticker** → Verify ticker exists using yfinance
-2. **Fetch Earnings Data** → Get last earnings date, EPS, revenue, guidance
-3. **Price Analysis** → Calculate returns vs SPY, sector, volatility, drawdown
-4. **Reddit Collection** → Scrape relevant posts/comments from key subreddits
-5. **LLM Analysis #1** → Analyze Reddit sentiment, extract themes (Claude)
-6. **LLM Analysis #2** → Synthesize all data into insight report (Claude)
-7. **Display Report** → Present findings with citations
+**Start frontend** (from `web/` directory):
+```bash
+npm run dev
+```
 
-### Tech Stack
+Open [http://localhost:3000](http://localhost:3000) and enter a stock ticker.
 
-- **yfinance**: Earnings dates and price data
-- **praw**: Reddit API wrapper
-- **anthropic**: Claude LLM API
-- **instructor**: Structured LLM outputs
-- **pydantic**: Data validation and schemas
+## Architecture
 
-## Mock Mode
+**Backend** (FastAPI + Python):
+- `core.py`: Data pipeline (yfinance for financials, asyncpraw for Reddit, instructor for structured LLM outputs)
+- `server.py`: REST API + WebSocket server for real-time progress updates
+- `models.py`: Pydantic schemas for type-safe LLM responses
 
-If Reddit API credentials are not provided, the script will use mock data to demonstrate functionality. This allows you to test without setting up Reddit API access.
+**Frontend** (Next.js 14 + TypeScript):
+- Real-time WebSocket connection for live analysis progress
+- LocalStorage-based history to revisit past analyses
+- Built with Tailwind CSS and shadcn/ui components
+
+**Analysis Pipeline:**
+```
+Ticker Input → Validate → Fetch Earnings + Prices → Fetch News Articles → Scrape Reddit → 
+LLM Analysis 1 (Reddit Sentiment) → LLM Analysis 2 (Synthesis w/ News) → 
+WebSocket Stream → Display Report
+```
+
+## Tech Stack
+
+**Backend:**
+- FastAPI (REST + WebSocket)
+- yfinance (stock data)
+- Finnhub (company news & earnings)
+- asyncpraw (Reddit API)
+- Anthropic Claude (Sonnet 4.5)
+- instructor + Pydantic (structured LLM outputs)
+
+**Frontend:**
+- Next.js 14 (App Router)
+- TypeScript
+- Tailwind CSS + shadcn/ui
+- WebSocket client
 
 ## Limitations
 
-- Requires last earnings to be within ~3 months (yfinance limitation)
-- Reddit data quality depends on ticker popularity
-- LLM analysis requires Anthropic API credits
-- Free tier rate limits may apply
+- Works best with earnings from the last 3 months (yfinance limitation)
+- Finnhub free tier limited to US stocks (perfect for our use case)
+- Reddit data quality varies by ticker popularity (NVDA works well, obscure stocks may have limited discussion)
+- In-memory caching (results lost on server restart; would use Redis for production)
+- Reddit API free tier has rate limits (60 requests/min)
 
-## Success Criteria
+## What could I add more?
 
-A good FewKnow report should:
-- ✅ Surface insights you couldn't get from 5 min of Googling
-- ✅ Show specific causality (X happened because Y)
-- ✅ Reveal what retail sentiment shows
-- ✅ Identify gaps between official narrative and reality
-- ✅ Make you want to try it with multiple tickers
+If I had more time, I would:
+- Replace in-memory cache with Redis for persistence
+- Add retry logic for Reddit API rate limits
+- Implement caching for expensive yfinance calls
+- Add proper unit tests
+- Support custom date ranges (not just since last earnings)
+- Add more data sources (Twitter/X, earnings call transcripts, etc.)
+- PDF export functionality
+- Daily report functionality
