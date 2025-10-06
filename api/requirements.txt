@@ -1,0 +1,10 @@
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+pydantic==2.9.2
+python-multipart==0.0.12
+yfinance>=0.2.32
+asyncpraw>=7.7.1
+anthropic>=0.39.0
+instructor>=1.6.4
+pydantic>=2.0.0
+lxml>=4.9.0
