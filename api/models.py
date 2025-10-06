@@ -56,6 +56,16 @@ class Event(BaseModel):
     source: str
 
 
+class NewsArticle(BaseModel):
+    """News article metadata"""
+    title: str
+    description: str
+    source: str
+    date: str
+    url: str
+    author: str
+
+
 class InsightReport(BaseModel):
     """Final output from LLM Call 2"""
     headline: str

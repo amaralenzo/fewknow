@@ -14,6 +14,7 @@ from anthropic import Anthropic
 import instructor
 import json
 import logging
+import requests
 
 from models import RedditAnalysis, InsightReport
 
@@ -237,6 +238,96 @@ def analyze_price_performance(ticker: str, earnings_date: str, sector: str) -> D
     except Exception as e:
         logger.error(f"Error analyzing price performance: {e}")
         raise
+
+
+def collect_news_articles(ticker: str, company_name: str, earnings_date: str) -> List[Dict]:
+    """
+    Collect news articles about the company since earnings using Finnhub.
+    
+    Args:
+        ticker: Stock ticker symbol
+        company_name: Full company name
+        earnings_date: Last earnings date (YYYY-MM-DD format)
+        
+    Returns:
+        List of news articles with headline, description, source, date, URL
+        
+    Raises:
+        ValueError: If Finnhub API key is missing
+        Exception: If API call fails
+    """
+    logger.info(f"Collecting news articles for {ticker}...")
+    
+    api_key = os.getenv('FINNHUB_API_KEY')
+    if not api_key:
+        logger.warning("FINNHUB_API_KEY not found, skipping news collection")
+        return []
+    
+    try:
+        # Parse earnings date
+        start_date = datetime.strptime(earnings_date, '%Y-%m-%d')
+        end_date = datetime.now()
+        
+        # Finnhub company-news endpoint
+        # Free tier supports 1 year of historical news
+        url = "https://finnhub.io/api/v1/company-news"
+        
+        params = {
+            'symbol': ticker.upper(),
+            'from': start_date.strftime('%Y-%m-%d'),
+            'to': end_date.strftime('%Y-%m-%d'),
+            'token': api_key
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        # Finnhub returns array directly (not wrapped in status object)
+        if not isinstance(data, list):
+            logger.error(f"Unexpected Finnhub response format: {type(data)}")
+            return []
+        
+        articles = []
+        for item in data:
+            # Finnhub returns: category, datetime (unix timestamp), headline, id, image, related, source, summary, url
+            headline = item.get('headline', '')
+            summary = item.get('summary', '')
+            
+            # Skip articles without headline or summary
+            if not headline or not summary:
+                continue
+            
+            # Convert unix timestamp to datetime
+            timestamp = item.get('datetime', 0)
+            article_date = datetime.fromtimestamp(timestamp) if timestamp else datetime.now()
+            
+            articles.append({
+                'title': headline,
+                'description': summary[:500],  # Limit summary length
+                'source': item.get('source', 'Unknown'),
+                'date': article_date.strftime('%Y-%m-%d'),
+                'url': item.get('url', ''),
+                'author': item.get('source', 'Unknown')  # Finnhub doesn't provide author, use source
+            })
+        
+        logger.info(f"Found {len(articles)} news articles for {ticker}")
+        return articles
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error fetching news from Finnhub: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"Unexpected error collecting news: {e}")
+        return []
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error fetching news from NewsAPI: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"Unexpected error collecting news: {e}")
+        return []
 
 
 async def _load_submission_comments(submission) -> None:
@@ -528,7 +619,8 @@ def generate_insight_report(
     earnings_metadata: Dict,
     price_performance: Dict,
     reddit_analysis: RedditAnalysis,
-    ticker: str
+    ticker: str,
+    news_articles: List[Dict] = None
 ) -> InsightReport:
     """
     Generate final insight report using LLM.
@@ -539,6 +631,7 @@ def generate_insight_report(
         price_performance: Price performance metrics
         reddit_analysis: Reddit sentiment analysis
         ticker: Stock ticker symbol
+        news_articles: Optional list of news articles from NewsAPI
         
     Returns:
         InsightReport object with final analysis
@@ -565,7 +658,23 @@ def generate_insight_report(
             'reddit_analysis': reddit_analysis.model_dump()
         }
         
+        # Add news articles if available
+        if news_articles:
+            context['news_articles'] = news_articles
+        
         context_json = json.dumps(context, indent=2, default=str)
+        
+        # Build prompt with conditional news section
+        news_instruction = ""
+        if news_articles and len(news_articles) > 0:
+            news_instruction = """
+IMPORTANT: You also have access to actual news articles published since earnings.
+Use these to:
+- Verify what Reddit discussions were referencing
+- Identify official company announcements vs speculation
+- Find events that explain price movements
+- Cross-reference official narrative with community reaction
+"""
         
         prompt = f"""You are a financial analyst writing an insight report for {ticker}.
 
@@ -573,26 +682,31 @@ Synthesize the following data to answer: "what actually happened since earnings?
 
 CONTEXT:
 {context_json}
+{news_instruction}
 
 Focus on:
 1. Expectation vs reality (what company said vs what happened)
 2. Attribution (why did price move this way?)
-3. Retail sentiment signals (what is Reddit spotting? Are they right?)
-4. Gaps and disconnects (official narrative vs street concerns)
-5. Forward-looking (what to watch before next earnings)
+3. News events and their impact (if news data available)
+4. Retail sentiment signals (what is Reddit spotting? Are they right?)
+5. Gaps and disconnects (official narrative vs street concerns vs actual news)
+6. Forward-looking (what to watch before next earnings)
 
 Requirements:
 - Cite specific dates and sources
-- Connect dots between events
+- Connect dots between news events, price movements, and sentiment
 - Identify surprises or contrarian signals
 - Avoid generic statements
 - Be specific about causality
 - Make it insightful - surface things not obvious from just looking at Yahoo Finance
+- Use plain text formatting (no Markdown) - text will be displayed as-is in a web interface
+- For emphasis, use ALL CAPS for key terms or use clear section breaks
+- Structure lists with simple dashes or numbers
 
 Output 4 sections:
 1. The Story (narrative of what happened - 2-3 paragraphs)
 2. Retail Perspective (what Reddit reveals that you wouldn't know otherwise)
-3. The Gap (disconnects between official narrative and reality)
+3. The Gap (disconnects between official narrative, news events, and reality)
 4. What's Next (forward-looking perspective on what to watch)
 
 Also provide a punchy headline and timeline of key events."""

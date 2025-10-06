@@ -20,6 +20,7 @@ from core import (
     get_earnings_metadata,
     analyze_price_performance,
     collect_reddit_data,
+    collect_news_articles,
     analyze_reddit_with_llm,
     generate_insight_report,
     load_env_file,
@@ -176,7 +177,7 @@ async def run_analysis(job_id: str, ticker: str):
         result["earnings_metadata"] = earnings_metadata
         
         # Step 3: Analyze price performance
-        await update_status(job_id, "processing", "40%", "Analyzing price performance...")
+        await update_status(job_id, "processing", "35%", "Analyzing price performance...")
         price_performance = analyze_price_performance(
             ticker,
             earnings_metadata['date'],
@@ -184,8 +185,17 @@ async def run_analysis(job_id: str, ticker: str):
         )
         result["price_performance"] = price_performance
         
-        # Step 4: Collect Reddit data
-        await update_status(job_id, "processing", "55%", "Collecting Reddit discussions...")
+        # Step 4: Collect news articles
+        await update_status(job_id, "processing", "45%", "Fetching recent news...")
+        news_articles = collect_news_articles(
+            ticker,
+            company_info['name'],
+            earnings_metadata['date']
+        )
+        result["news_articles"] = news_articles
+        
+        # Step 5: Collect Reddit data
+        await update_status(job_id, "processing", "60%", "Collecting Reddit discussions...")
         reddit_posts = await collect_reddit_data(
             ticker,
             company_info['name'],
@@ -203,11 +213,23 @@ async def run_analysis(job_id: str, ticker: str):
             
             # Create minimal insight report
             from models import InsightReport, Event
+            
+            # Build story with news if available
+            story_parts = [
+                f"Price performance analysis for {company_info['name']} since earnings on {earnings_metadata['date']}. ",
+                f"Stock has moved {price_performance.get('since_earnings', 'N/A')} since last earnings report."
+            ]
+            
+            if news_articles and len(news_articles) > 0:
+                story_parts.append(f" {len(news_articles)} news articles were published during this period, providing context for market movements.")
+                sources = ["Yahoo Finance", "yfinance API", "NewsAPI"]
+            else:
+                story_parts.append(" No Reddit discussion data was available for this ticker during the analysis period.")
+                sources = ["Yahoo Finance", "yfinance API"]
+            
             minimal_report = InsightReport(
                 headline=f"{ticker}: Analysis Complete (Limited Data Available)",
-                story=f"Price performance analysis for {company_info['name']} since earnings on {earnings_metadata['date']}. "
-                      f"Stock has moved {price_performance.get('since_earnings', 'N/A')} since last earnings report. "
-                      f"No Reddit discussion data was available for this ticker during the analysis period.",
+                story="".join(story_parts),
                 retail_perspective="No retail investor discussion data available for this period.",
                 the_gap="Insufficient data to identify gaps between official narrative and retail sentiment.",
                 whats_next=f"Monitor upcoming earnings reports and price action relative to sector performance ({price_performance.get('sector_etf', 'N/A')}).",
@@ -218,12 +240,12 @@ async def run_analysis(job_id: str, ticker: str):
                         source="Yahoo Finance"
                     )
                 ],
-                sources=["Yahoo Finance", "yfinance API"]
+                sources=sources
             )
             result["insight_report"] = minimal_report.model_dump()
         else:
-            # Step 5: Analyze Reddit with LLM
-            await update_status(job_id, "processing", "70%", "Analyzing sentiment with AI...")
+            # Step 6: Analyze Reddit with LLM
+            await update_status(job_id, "processing", "75%", "Analyzing sentiment with AI...")
             reddit_analysis = analyze_reddit_with_llm(
                 reddit_posts,
                 ticker,
@@ -231,14 +253,15 @@ async def run_analysis(job_id: str, ticker: str):
             )
             result["reddit_analysis"] = reddit_analysis.model_dump()
             
-            # Step 6: Generate insight report
+            # Step 7: Generate insight report (with news articles if available)
             await update_status(job_id, "processing", "85%", "Generating insights...")
             insight_report = generate_insight_report(
                 company_info,
                 earnings_metadata,
                 price_performance,
                 reddit_analysis,
-                ticker
+                ticker,
+                news_articles=news_articles if news_articles else None
             )
             result["insight_report"] = insight_report.model_dump()
         
