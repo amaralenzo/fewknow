@@ -5,7 +5,7 @@ Clean, reusable functions without CLI dependencies.
 
 import os
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+from typing import List, Dict
 from pathlib import Path
 import yfinance as yf
 import asyncpraw
@@ -42,7 +42,7 @@ def load_env_file():
 # DATA COLLECTION FUNCTIONS
 # ============================================================================
 
-def validate_ticker(ticker: str) -> Optional[Dict]:
+def validate_ticker(ticker: str) -> Dict:
     """
     Validate ticker exists and get basic company info.
     
@@ -50,7 +50,11 @@ def validate_ticker(ticker: str) -> Optional[Dict]:
         ticker: Stock ticker symbol
         
     Returns:
-        Dictionary with company info or None if invalid
+        Dictionary with company info
+        
+    Raises:
+        ValueError: If ticker is invalid or not found
+        Exception: If critical error occurs during validation
     """
     logger.info(f"Validating ticker {ticker}...")
     try:
@@ -59,7 +63,7 @@ def validate_ticker(ticker: str) -> Optional[Dict]:
         
         if not info or 'symbol' not in info:
             logger.warning(f"Ticker {ticker} not found")
-            return None
+            raise ValueError(f"Ticker '{ticker}' not found or invalid")
             
         company_info = {
             'ticker': ticker.upper(),
@@ -71,12 +75,14 @@ def validate_ticker(ticker: str) -> Optional[Dict]:
         logger.info(f"Found: {company_info['name']} ({company_info['sector']})")
         return company_info
         
+    except ValueError:
+        raise
     except Exception as e:
         logger.error(f"Error validating ticker: {e}")
-        return None
+        raise
 
 
-def get_earnings_metadata(ticker: str) -> Optional[Dict]:
+def get_earnings_metadata(ticker: str) -> Dict:
     """
     Fetch last earnings date and key metrics.
     
@@ -84,7 +90,7 @@ def get_earnings_metadata(ticker: str) -> Optional[Dict]:
         ticker: Stock ticker symbol
         
     Returns:
-        Dictionary with earnings metadata or None if error
+        Dictionary with earnings metadata
         
     Raises:
         Exception: If critical error occurs during data fetch
@@ -172,6 +178,10 @@ def analyze_price_performance(ticker: str, earnings_date: str, sector: str) -> D
         
     Returns:
         Dictionary with performance metrics
+        
+    Raises:
+        ValueError: If no price data is available
+        Exception: If critical error occurs during analysis
     """
     logger.info(f"Analyzing price performance since {earnings_date}...")
     
@@ -192,7 +202,7 @@ def analyze_price_performance(ticker: str, earnings_date: str, sector: str) -> D
         
         if stock_data.empty:
             logger.warning("No price data available")
-            return {}
+            raise ValueError(f"No price data available for {ticker} since {earnings_date}")
         
         # Calculate returns
         stock_return = ((stock_data['Close'].iloc[-1] / stock_data['Close'].iloc[0]) - 1) * 100
@@ -222,9 +232,100 @@ def analyze_price_performance(ticker: str, earnings_date: str, sector: str) -> D
         logger.info(f"Performance: {performance['since_earnings']} (vs S&P 500: {performance['vs_sp500']})")
         return performance
         
+    except ValueError:
+        raise
     except Exception as e:
         logger.error(f"Error analyzing price performance: {e}")
-        return {}
+        raise
+
+
+async def _load_submission_comments(submission) -> None:
+    """
+    Helper to load comments for a submission.
+    Handles errors gracefully and returns None if loading fails.
+    """
+    if not hasattr(submission, 'comments'):
+        return None
+    
+    comments_forest = submission.comments
+    
+    if getattr(comments_forest, "_comments", None) is None:
+        try:
+            await submission.load()
+        except Exception as load_error:
+            logger.debug(f"Unable to load comments for {submission.id}: {load_error}")
+            return None
+        comments_forest = submission.comments
+    
+    if getattr(comments_forest, "_comments", None) is None:
+        return None
+    
+    return comments_forest
+
+
+async def _extract_quality_comments(submission, subreddit_name: str, max_comments: int = 5) -> List[Dict]:
+    """
+    Extract quality comments from a submission using BFS traversal.
+    
+    Args:
+        submission: Reddit submission object
+        subreddit_name: Name of the subreddit
+        max_comments: Maximum number of comments to extract
+        
+    Returns:
+        List of comment data dictionaries
+    """
+    comments_forest = await _load_submission_comments(submission)
+    if not comments_forest:
+        return []
+    
+    try:
+        await comments_forest.replace_more(limit=0)
+    except Exception as e:
+        logger.debug(f"Error replacing MoreComments for {submission.id}: {e}")
+        return []
+    
+    quality_comments = []
+    comment_queue = list(getattr(comments_forest, "_comments", []) or [])
+    
+    while comment_queue and len(quality_comments) < max_comments:
+        comment = comment_queue.pop(0)
+        
+        # Skip MoreComments objects
+        if isinstance(comment, MoreComments):
+            continue
+        
+        # Get comment attributes safely
+        body = getattr(comment, "body", None)
+        score = getattr(comment, "score", 0)
+        created_utc = getattr(comment, "created_utc", None)
+        
+        # Filter low-quality comments
+        if not body or score < 5 or len(body) <= 100:
+            # Still queue up replies for potential higher-quality nested comments
+            replies_forest = getattr(comment, "replies", None)
+            if replies_forest and getattr(replies_forest, "_comments", None):
+                comment_queue.extend(replies_forest._comments)
+            continue
+        
+        # Add quality comment
+        comment_data = {
+            'type': 'comment',
+            'date': datetime.fromtimestamp(created_utc).strftime('%Y-%m-%d') if created_utc else 'unknown',
+            'title': f"Comment on: {submission.title[:50]}...",
+            'text': body[:1000],
+            'score': score,
+            'url': f"https://reddit.com{submission.permalink}",
+            'subreddit': subreddit_name
+        }
+        quality_comments.append(comment_data)
+        
+        # Queue up replies for BFS traversal
+        replies_forest = getattr(comment, "replies", None)
+        if replies_forest and getattr(replies_forest, "_comments", None):
+            comment_queue.extend(replies_forest._comments)
+    
+    return quality_comments
 
 
 async def collect_reddit_data(ticker: str, company_name: str, earnings_date: str) -> List[Dict]:
@@ -321,64 +422,8 @@ async def collect_reddit_data(ticker: str, company_name: str, earnings_date: str
         logger.info(f"Processing comments from top {len(top_submissions)} submissions...")
         
         for submission, subreddit_name in top_submissions:
-            try:
-                comments_forest = submission.comments
-
-                # Skip if no comments attribute
-                if not hasattr(submission, 'comments'):
-                    continue
-
-                if getattr(comments_forest, "_comments", None) is None:
-                    try:
-                        await submission.load()
-                    except Exception as load_error:
-                        logger.debug(f"Unable to load comments for {submission.id}: {load_error}")
-                        continue
-                    comments_forest = submission.comments
-
-                if getattr(comments_forest, "_comments", None) is None:
-                    continue
-
-                await comments_forest.replace_more(limit=0)
-
-                comment_count = 0
-                # Safely traverse comment forest while tolerating missing replies
-                comment_queue = list(getattr(comments_forest, "_comments", []) or [])
-
-                while comment_queue and comment_count < 5:
-                    comment = comment_queue.pop(0)
-
-                    if isinstance(comment, MoreComments):
-                        continue
-
-                    body = getattr(comment, "body", None)
-                    score = getattr(comment, "score", 0)
-
-                    if not body or score < 5 or len(body) <= 100:
-                        # Queue up replies for potential higher-quality comments
-                        replies_forest = getattr(comment, "replies", None)
-                        if replies_forest and getattr(replies_forest, "_comments", None):
-                            comment_queue.extend(replies_forest._comments)
-                        continue
-
-                    comment_data = {
-                        'type': 'comment',
-                        'date': datetime.fromtimestamp(comment.created_utc).strftime('%Y-%m-%d'),
-                        'title': f"Comment on: {submission.title[:50]}...",
-                        'text': body[:1000],
-                        'score': score,
-                        'url': f"https://reddit.com{submission.permalink}",
-                        'subreddit': subreddit_name
-                    }
-                    all_posts.append(comment_data)
-                    comment_count += 1
-
-                    replies_forest = getattr(comment, "replies", None)
-                    if replies_forest and getattr(replies_forest, "_comments", None):
-                        comment_queue.extend(replies_forest._comments)
-            except Exception as comment_error:
-                logger.debug(f"Error fetching comments for {submission.id}: {comment_error}")
-                continue
+            comments = await _extract_quality_comments(submission, subreddit_name, max_comments=5)
+            all_posts.extend(comments)
         
         # Sort by score and limit
         all_posts.sort(key=lambda x: x['score'], reverse=True)
