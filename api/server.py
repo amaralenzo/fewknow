@@ -55,7 +55,7 @@ analysis_cache = {}
 analysis_status = {}
 
 # Cache expiration settings
-CACHE_TTL_HOURS = 24  # Results expire after 24 hours
+CACHE_TTL_HOURS = 1
 
 # WebSocket connection manager
 class ConnectionManager:
