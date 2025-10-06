@@ -14,7 +14,7 @@ import logging
 import json
 import asyncio
 
-# Import from local modules (absolute imports since this is the entry point)
+# Import from local modules
 from core import (
     validate_ticker,
     get_earnings_metadata,
@@ -25,7 +25,6 @@ from core import (
     generate_insight_report,
     load_env_file,
 )
-from models import RedditAnalysis, InsightReport
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -448,30 +447,3 @@ async def websocket_endpoint(websocket: WebSocket, job_id: str):
         logger.error(f"WebSocket error for job {job_id}: {e}")
     finally:
         manager.disconnect(job_id)
-
-# ============================================================================
-# MAIN
-# ============================================================================
-
-if __name__ == "__main__":
-    import uvicorn
-    
-    port = int(os.getenv("PORT", "8000"))
-    
-    print(f"""
-    ================================================================================
-    🚀 FewKnow API Server
-    ================================================================================
-    Server running on: http://localhost:{port}
-    API Documentation: http://localhost:{port}/docs
-    Health Check: http://localhost:{port}/
-    ================================================================================
-    """)
-    
-    uvicorn.run(
-        "server:app",
-        host="0.0.0.0",
-        port=port,
-        reload=True,
-        log_level="info"
-    )

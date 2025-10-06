@@ -1,6 +1,5 @@
 """
 Core analysis logic for FewKnow.
-Clean, reusable functions without CLI dependencies.
 """
 
 import os
@@ -104,12 +103,8 @@ def get_earnings_metadata(ticker: str) -> Dict:
         earnings_dates = stock.earnings_dates
         if earnings_dates is None or len(earnings_dates) == 0:
             logger.warning("No earnings dates found, using alternative method...")
-            # Fallback: use calendar
-            calendar = stock.calendar
-            if calendar is not None and not calendar.empty:
-                last_earnings_date = datetime.now() - timedelta(days=90)  # Assume last quarter
-            else:
-                last_earnings_date = datetime.now() - timedelta(days=90)
+            # Fallback: assume last quarterly earnings ~90 days ago
+            last_earnings_date = datetime.now() - timedelta(days=90)
         else:
             # Get most recent earnings date
             # Convert to timezone-naive datetime by replacing tzinfo with None
@@ -317,13 +312,6 @@ def collect_news_articles(ticker: str, company_name: str, earnings_date: str) ->
         
     except requests.exceptions.RequestException as e:
         logger.error(f"Error fetching news from Finnhub: {e}")
-        return []
-    except Exception as e:
-        logger.error(f"Unexpected error collecting news: {e}")
-        return []
-        
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error fetching news from NewsAPI: {e}")
         return []
     except Exception as e:
         logger.error(f"Unexpected error collecting news: {e}")
