@@ -34,9 +34,10 @@ export default function Home() {
     const newEntry = { ...analysis, timestamp: new Date().toISOString() };
     
     // Avoid duplicates - check if same ticker analyzed recently (within last hour)
+    const ONE_HOUR_MS = 60 * 60 * 1000;
     const isDuplicate = history.some((entry: any) => {
       const timeDiff = new Date().getTime() - new Date(entry.timestamp).getTime();
-      return entry.ticker === analysis.ticker && timeDiff < 3600000; // 1 hour
+      return entry.ticker === analysis.ticker && timeDiff < ONE_HOUR_MS;
     });
     
     if (!isDuplicate) {
