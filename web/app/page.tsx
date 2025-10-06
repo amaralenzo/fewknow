@@ -1,11 +1,12 @@
 'use client'
 
 import { useState, useEffect, useRef } from "react";
-import { Search, Lightbulb, MessageCircle, Sparkles, ArrowRight, TrendingUp, Calendar, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Search, ArrowRight, TrendingUp, Calendar, AlertCircle, CheckCircle2, History } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { api, AnalysisStatus, AnalysisResult } from "@/lib/api";
+import { HistoryPanel } from "@/components/HistoryPanel";
 
 export default function Home() {
   const [ticker, setTicker] = useState("");
@@ -13,6 +14,7 @@ export default function Home() {
   const [status, setStatus] = useState<AnalysisStatus | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const cleanupRef = useRef<(() => void) | null>(null);
 
   // Cleanup WebSocket on unmount
@@ -23,6 +25,32 @@ export default function Home() {
       }
     };
   }, []);
+
+  // Save to localStorage when analysis completes
+  const saveToHistory = (analysis: AnalysisResult) => {
+    if (typeof window === 'undefined') return;
+    
+    const history = JSON.parse(localStorage.getItem('analysisHistory') || '[]');
+    const newEntry = { ...analysis, timestamp: new Date().toISOString() };
+    
+    // Avoid duplicates - check if same ticker analyzed recently (within last hour)
+    const isDuplicate = history.some((entry: any) => {
+      const timeDiff = new Date().getTime() - new Date(entry.timestamp).getTime();
+      return entry.ticker === analysis.ticker && timeDiff < 3600000; // 1 hour
+    });
+    
+    if (!isDuplicate) {
+      const updated = [newEntry, ...history].slice(0, 20); // Keep last 20
+      localStorage.setItem('analysisHistory', JSON.stringify(updated));
+    }
+  };
+
+  const handleSelectAnalysis = (analysis: AnalysisResult) => {
+    setResult(analysis);
+    setTicker(analysis.ticker);
+    setError(null);
+    setStatus(null);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,6 +80,7 @@ export default function Home() {
         },
         (analysisResult) => {
           setResult(analysisResult);
+          saveToHistory(analysisResult); // Save to history
           setLoading(false);
           setStatus(null);
         },
@@ -73,9 +102,16 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-amber-50">
+      {/* History Panel */}
+      <HistoryPanel 
+        isOpen={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        onSelectAnalysis={handleSelectAnalysis}
+      />
+
       {/* Hero Section */}
-      <div className="container mx-auto px-4 py-20">
-        <div className="max-w-4xl mx-auto text-center space-y-8">
+      <div className="container mx-auto px-4 pt-20 pb-12">
+        <div className="max-w-4xl mx-auto text-center">
           {/* Logo/Brand */}
           <div className="space-y-4">
             <h1 className="text-6xl md:text-7xl font-bold text-gray-900 tracking-tight">
@@ -87,10 +123,28 @@ export default function Home() {
           </div>
 
           {/* Description */}
-          <p className="text-lg text-gray-700 max-w-2xl mx-auto leading-relaxed">
+          <p className="text-lg text-gray-700 max-w-2xl mx-auto leading-relaxed mt-8">
             Discover the real story behind earnings reports by connecting official announcements, 
             actual events, and community insights to reveal patterns others miss.
           </p>
+        </div>
+      </div>
+
+      {/* Search Section */}
+      <div className="container mx-auto px-4 py-8">
+        <div className="max-w-4xl mx-auto text-center space-y-8">
+          {/* History Button */}
+          <div className="flex justify-center">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setHistoryOpen(true)}
+              className="text-orange-600 border-orange-300 hover:bg-orange-50"
+            >
+              <History className="h-4 w-4 mr-2" />
+              View History
+            </Button>
+          </div>
 
           {/* Ticker Input */}
           <form onSubmit={handleSubmit} className="max-w-md mx-auto">
@@ -156,9 +210,13 @@ export default function Home() {
               </CardContent>
             </Card>
           )}
+        </div>
+      </div>
 
-          {/* Results Display */}
-          {result && result.insight_report && (
+      {/* Results Section */}
+      {result && result.insight_report && (
+        <div className="container mx-auto px-4">
+          <div className="max-w-4xl mx-auto">
             <div className="mt-12 space-y-6 text-left">
               {/* Company Header */}
               {result.company_info && (
@@ -311,53 +369,25 @@ export default function Home() {
                 </Card>
               )}
             </div>
-          )}
+          </div>
+        </div>
+      )}
 
-          {/* Feature Cards (only show when no results) */}
-          {!result && (
-            <div className="grid md:grid-cols-3 gap-6 mt-16 text-left">
-              <Card className="bg-white border-gray-200 hover:border-orange-300 hover:shadow-lg transition-all">
-                <CardHeader>
-                  <div className="h-12 w-12 rounded-lg bg-orange-100 flex items-center justify-center mb-4">
-                    <Lightbulb className="h-6 w-6 text-orange-500" />
-                  </div>
-                  <CardTitle className="text-gray-900">Real Insights</CardTitle>
-                  <CardDescription className="text-gray-600">
-                    Connect expectations vs reality to understand what actually drove performance changes
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-
-              <Card className="bg-white border-gray-200 hover:border-orange-300 hover:shadow-lg transition-all">
-                <CardHeader>
-                  <div className="h-12 w-12 rounded-lg bg-amber-100 flex items-center justify-center mb-4">
-                    <MessageCircle className="h-6 w-6 text-amber-600" />
-                  </div>
-                  <CardTitle className="text-gray-900">Community Voice</CardTitle>
-                  <CardDescription className="text-gray-600">
-                    Discover what community discussions reveal before it becomes mainstream knowledge
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-
-              <Card className="bg-white border-gray-200 hover:border-orange-300 hover:shadow-lg transition-all">
-                <CardHeader>
-                  <div className="h-12 w-12 rounded-lg bg-orange-100 flex items-center justify-center mb-4">
-                    <Sparkles className="h-6 w-6 text-orange-500" />
-                  </div>
-                  <CardTitle className="text-gray-900">AI-Powered Analysis</CardTitle>
-                  <CardDescription className="text-gray-600">
-                    Surface non-obvious patterns and connections across multiple data sources
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-            </div>
-          )}
-
-          {/* Footer */}
-          <div className="mt-16 pt-8 border-t border-gray-200">
+      {/* Footer */}
+      <div className="container mx-auto px-4 py-16">
+        <div className="max-w-4xl mx-auto text-center">
+          <div className="pt-4 border-t border-gray-200">
             <p className="text-gray-500 text-sm">
-              Powered by Claude AI • Data from public sources
+              Made by{" "}
+              <a 
+                href="https://www.linkedin.com/in/enzosamaral/" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-orange-600 hover:text-orange-700 underline"
+              >
+                amaralenzo
+              </a>
+              {" "}for Gaus
             </p>
           </div>
         </div>
