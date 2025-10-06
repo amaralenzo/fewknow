@@ -35,8 +35,8 @@ REDDIT_USER_AGENT=FewKnow/1.0
 
 Get API keys:
 - **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
-- **Finnhub** (optional): [finnhub.io](https://finnhub.io/) (free tier: 60 calls/min, 1 year historical news)
-- **Reddit**: [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps) (create app → select "script")
+- **Finnhub**: [finnhub.io](https://finnhub.io/)
+- **Reddit**: [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps) (create app → select "script" → put localhost as redirect)
 
 ### 2. Install Dependencies
 
@@ -120,4 +120,5 @@ If I had more time, I would:
 - Add more data sources (Twitter/X, earnings call transcripts, etc.)
 - PDF export functionality
 - Daily report functionality
+
 - Markdown formatting for results
