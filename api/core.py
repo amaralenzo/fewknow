@@ -26,7 +26,6 @@ from constants import (
     MAX_SUBMISSIONS_FOR_COMMENTS,
     MAX_COMMENTS_PER_SUBMISSION,
     MAX_TOTAL_POSTS,
-    REDDIT_SEARCH_TIME_FILTER,
     MAX_NEWS_ARTICLES,
     MAX_NEWS_DESCRIPTION_LENGTH,
     NEWS_API_TIMEOUT,
@@ -477,6 +476,13 @@ async def collect_reddit_data(ticker: str, company_name: str, earnings_date: str
         start_date = datetime.strptime(earnings_date, '%Y-%m-%d')
         start_timestamp = start_date.timestamp()
         
+        # Dynamic time filter: use 'month' if earnings < 30 days ago, otherwise 'year'
+        # This prevents missing relevant posts when earnings are old, while keeping
+        # results focused when earnings are recent
+        days_since_earnings = (datetime.now() - start_date).days
+        time_filter = 'month' if days_since_earnings < 31 else 'year'
+        logger.info(f"Using Reddit time_filter='{time_filter}' (earnings {days_since_earnings} days ago)")
+        
         # Search queries
         queries = [f"${ticker}", company_name]
         
@@ -489,7 +495,7 @@ async def collect_reddit_data(ticker: str, company_name: str, earnings_date: str
             for query in queries:
                 try:
                     # Search posts
-                    search_results = subreddit.search(query, time_filter=REDDIT_SEARCH_TIME_FILTER, limit=MAX_REDDIT_SEARCH_LIMIT)
+                    search_results = subreddit.search(query, time_filter=time_filter, limit=MAX_REDDIT_SEARCH_LIMIT)
                     
                     if search_results is None:
                         logger.warning(f"No search results for '{query}' in {subreddit_name}")

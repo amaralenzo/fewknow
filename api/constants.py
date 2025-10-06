@@ -40,7 +40,6 @@ MAX_TEXT_LENGTH = 1000  # Maximum text length to store (truncate longer content)
 MAX_SUBMISSIONS_FOR_COMMENTS = 30  # How many top submissions to extract comments from
 MAX_COMMENTS_PER_SUBMISSION = 5  # Max comments to extract per submission
 MAX_TOTAL_POSTS = 100  # Maximum total posts/comments to return
-REDDIT_SEARCH_TIME_FILTER = 'month'  # Time filter for Reddit search (month, week, year, all)
 
 
 # ============================================================================
