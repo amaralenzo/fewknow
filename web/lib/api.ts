@@ -185,10 +185,13 @@ export const api = {
     onComplete?: (result: AnalysisResult) => void,
     onError?: (error: string) => void
   ): Promise<() => void> {
-    // Start the analysis job
-    const { job_id } = await this.startAnalysis(ticker);
+    // Start the analysis job and get the job_id
+    const analysisPromise = this.startAnalysis(ticker);
     
-    // Connect to WebSocket
+    // Wait for job_id
+    const { job_id } = await analysisPromise;
+    
+    // Immediately connect to WebSocket (before the job makes much progress)
     const ws = new WebSocket(`${WS_BASE_URL}/ws/${job_id}`);
     
     ws.onopen = () => {

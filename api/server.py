@@ -155,6 +155,9 @@ async def run_analysis(job_id: str, ticker: str):
         # Initialize status immediately
         await update_status(job_id, "processing", "0%", "Starting analysis...")
         
+        # necessary to guarantee that we can connect to the websocket before analysis starts
+        await asyncio.sleep(0.5)
+        
         # Initialize result
         result = {
             "job_id": job_id,
