@@ -658,22 +658,28 @@ def generate_insight_report(
             'reddit_analysis': reddit_analysis.model_dump()
         }
         
-        # Add news articles if available
+        # Add news articles if available (limit to most recent 30 to avoid token overflow)
         if news_articles:
-            context['news_articles'] = news_articles
+            # Sort by date (most recent first) and take top 30
+            sorted_news = sorted(news_articles, key=lambda x: x.get('date', ''), reverse=True)
+            context['news_articles'] = sorted_news[:30]
+            context['news_articles_count'] = len(news_articles)  # Include total count for context
         
         context_json = json.dumps(context, indent=2, default=str)
         
         # Build prompt with conditional news section
         news_instruction = ""
         if news_articles and len(news_articles) > 0:
-            news_instruction = """
-IMPORTANT: You also have access to actual news articles published since earnings.
+            news_count = len(news_articles)
+            included_count = min(30, news_count)
+            news_instruction = f"""
+IMPORTANT: You have access to {included_count} of the most recent news articles (out of {news_count} total) published since earnings.
 Use these to:
 - Verify what Reddit discussions were referencing
 - Identify official company announcements vs speculation
 - Find events that explain price movements
 - Cross-reference official narrative with community reaction
+- Build a timeline of significant events
 """
         
         prompt = f"""You are a financial analyst writing an insight report for {ticker}.
@@ -699,8 +705,6 @@ Requirements:
 - Avoid generic statements
 - Be specific about causality
 - Make it insightful - surface things not obvious from just looking at Yahoo Finance
-- Use plain text formatting (no Markdown) - text will be displayed as-is in a web interface
-- For emphasis, use ALL CAPS for key terms or use clear section breaks
 - Structure lists with simple dashes or numbers
 
 Output 4 sections:
@@ -713,7 +717,7 @@ Also provide a punchy headline and timeline of key events."""
 
         response = client.messages.create(
             model="claude-sonnet-4-5-20250929",
-            max_tokens=8000,
+            max_tokens=16000,  # Increased for comprehensive reports with news analysis
             messages=[{"role": "user", "content": prompt}],
             response_model=InsightReport
         )
