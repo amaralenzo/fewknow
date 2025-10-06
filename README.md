@@ -41,7 +41,19 @@ Get API keys:
 ### 2. Install Dependencies
 
 **Backend:**
+
+it's probably best to use a python virtual environment for installing the dependencies
 ```bash
+# creates virtual environment
+python -m venv venv
+
+# activates virtual environment
+# On Windows:
+venv\Scripts\activate
+# On macOS/Linux:
+source venv/bin/activate
+
+# only after activating it, you should install dependencies
 cd api
 pip install -r requirements.txt
 ```
@@ -138,6 +150,6 @@ WebSocket definitely gave me some trouble. There was a **race condition** proble
 
 One interesting part of the implementation process was that, in the middle of testing, I **accidentally refreshed my page** while the analysis was running and that showed a big issue. The backend kept processing, but WebSocket disconnected and I lost my result because the job ID wasn't stored anywhere. To fix, I added **job tracking in the localStorage** so the app can resume tracking if someone refreshes. The loading information functionality doesn't work great in these cases, unfortunately.
 
-Another big implementation decision I had to take was related **Reddit's time filtering**. Using `time_filter='month'` gives focused results but misses posts about earnings that were >30 days ago. Using `'year'` gets all posts but can end up being dominated by old viral post. and after filtering for date, I would end up with no posts (even if they did exist). I added implementing **dynamic filtering** based on how old the earnings date, where if its less than 30 days, I use `'month'`, otherwise I use `'year'`. This is not a perfect solution, because it is still possible to end up with no posts when the earnings is old and there are many viral posts in the last year, but I found that it is not a common occurence.
+Another big implementation decision I had to take was related **Reddit's time filtering**. Using `time_filter='month'` gives focused results but misses posts about earnings that were >30 days ago. Using `'year'` gets all posts but can end up being dominated by old viral post. and after filtering for date, I would end up with no posts (even if they did exist). I added implementing **dynamic filtering** based on how old the earnings date, where if its less than 30 days, I use `'month'`, otherwise I use `'year'`. This is not a perfect solution, because it is still possible to end up with a small quantity of posts when the earnings is old and there are many viral posts in the last year, but I found that it is not a common occurence.
 
 Finally, in the middle of the implementation I added a **history feature** because I wanted to compare past analyses without re-running everything. After each analysis, I just store them in **localStorage**, so no backend persistence.
