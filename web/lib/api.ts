@@ -64,6 +64,54 @@ export interface AnalysisResult {
   error?: string;
 }
 
+export interface InProgressJob {
+  job_id: string;
+  ticker: string;
+  started_at: string;
+}
+
+// LocalStorage helpers
+export const storage = {
+  /**
+   * Save an in-progress job
+   */
+  saveInProgressJob(job: InProgressJob) {
+    if (typeof window === 'undefined') return;
+    const jobs = this.getInProgressJobs();
+    jobs.push(job);
+    localStorage.setItem('inProgressJobs', JSON.stringify(jobs));
+  },
+
+  /**
+   * Get all in-progress jobs
+   */
+  getInProgressJobs(): InProgressJob[] {
+    if (typeof window === 'undefined') return [];
+    const data = localStorage.getItem('inProgressJobs');
+    return data ? JSON.parse(data) : [];
+  },
+
+  /**
+   * Remove a job from in-progress list
+   */
+  removeInProgressJob(job_id: string) {
+    if (typeof window === 'undefined') return;
+    const jobs = this.getInProgressJobs().filter(j => j.job_id !== job_id);
+    localStorage.setItem('inProgressJobs', JSON.stringify(jobs));
+  },
+
+  /**
+   * Clean up old in-progress jobs (older than 24 hours)
+   */
+  cleanupOldJobs() {
+    if (typeof window === 'undefined') return;
+    const jobs = this.getInProgressJobs();
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const validJobs = jobs.filter(j => new Date(j.started_at) > oneDayAgo);
+    localStorage.setItem('inProgressJobs', JSON.stringify(validJobs));
+  }
+};
+
 class APIError extends Error {
   constructor(public statusCode: number, message: string) {
     super(message);
@@ -191,6 +239,13 @@ export const api = {
     // Wait for job_id
     const { job_id } = await analysisPromise;
     
+    // Save to localStorage immediately so we can resume if page closes
+    storage.saveInProgressJob({
+      job_id,
+      ticker: ticker.toUpperCase(),
+      started_at: new Date().toISOString()
+    });
+    
     // Immediately connect to WebSocket (before the job makes much progress)
     const ws = new WebSocket(`${WS_BASE_URL}/ws/${job_id}`);
     
@@ -210,6 +265,8 @@ export const api = {
             break;
             
           case 'result':
+            // Remove from in-progress list when completed
+            storage.removeInProgressJob(job_id);
             if (onComplete) {
               onComplete(message.data);
             }
@@ -217,6 +274,8 @@ export const api = {
             break;
             
           case 'error':
+            // Remove from in-progress list on error
+            storage.removeInProgressJob(job_id);
             if (onError) {
               onError(message.data.error || 'Analysis failed');
             }
@@ -253,6 +312,91 @@ export const api = {
     }, 30000); // Every 30 seconds
     
     // Return cleanup function
+    return () => {
+      clearInterval(pingInterval);
+      ws.close();
+    };
+  },
+
+  /**
+   * Resume an in-progress job by reconnecting to its WebSocket
+   */
+  async resumeJob(
+    job_id: string,
+    onStatus?: (status: AnalysisStatus) => void,
+    onComplete?: (result: AnalysisResult) => void,
+    onError?: (error: string) => void
+  ): Promise<() => void> {
+    // First check if job is already complete
+    try {
+      const result = await this.getResult(job_id);
+      if (onComplete) {
+        onComplete(result);
+      }
+      storage.removeInProgressJob(job_id);
+      return () => {}; // No-op cleanup
+    } catch (error) {
+      // Job not complete yet, continue to WebSocket connection
+    }
+    
+    // Connect to WebSocket for live updates
+    const ws = new WebSocket(`${WS_BASE_URL}/ws/${job_id}`);
+    
+    ws.onopen = () => {
+      console.log('WebSocket reconnected for job:', job_id);
+    };
+    
+    ws.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        
+        switch (message.type) {
+          case 'status':
+            if (onStatus) {
+              onStatus(message.data);
+            }
+            break;
+            
+          case 'result':
+            storage.removeInProgressJob(job_id);
+            if (onComplete) {
+              onComplete(message.data);
+            }
+            ws.close();
+            break;
+            
+          case 'error':
+            storage.removeInProgressJob(job_id);
+            if (onError) {
+              onError(message.data.error || 'Analysis failed');
+            }
+            ws.close();
+            break;
+        }
+      } catch (error) {
+        console.error('Error parsing WebSocket message:', error);
+      }
+    };
+    
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      if (onError) {
+        onError('Connection error');
+      }
+    };
+    
+    ws.onclose = () => {
+      console.log('WebSocket closed for job:', job_id);
+    };
+    
+    const pingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send('ping');
+      } else {
+        clearInterval(pingInterval);
+      }
+    }, 30000);
+    
     return () => {
       clearInterval(pingInterval);
       ws.close();

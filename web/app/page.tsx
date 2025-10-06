@@ -5,7 +5,7 @@ import { Search, ArrowRight, TrendingUp, Calendar, AlertCircle, CheckCircle2, Hi
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { api, AnalysisStatus, AnalysisResult } from "@/lib/api";
+import { api, AnalysisStatus, AnalysisResult, InProgressJob, storage } from "@/lib/api";
 import { HistoryPanel } from "@/components/HistoryPanel";
 
 export default function Home() {
@@ -15,7 +15,19 @@ export default function Home() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [inProgressJobs, setInProgressJobs] = useState<InProgressJob[]>([]);
+  const [showResumeDialog, setShowResumeDialog] = useState(false);
   const cleanupRef = useRef<(() => void) | null>(null);
+
+  // Check for in-progress jobs on mount
+  useEffect(() => {
+    storage.cleanupOldJobs();
+    const jobs = storage.getInProgressJobs();
+    if (jobs.length > 0) {
+      setInProgressJobs(jobs);
+      setShowResumeDialog(true);
+    }
+  }, []);
 
   // Cleanup WebSocket on unmount
   useEffect(() => {
@@ -51,6 +63,47 @@ export default function Home() {
     setTicker(analysis.ticker);
     setError(null);
     setStatus(null);
+  };
+
+  const handleResumeJob = async (job: InProgressJob) => {
+    setShowResumeDialog(false);
+    setTicker(job.ticker);
+    setLoading(true);
+    setError(null);
+    setStatus(null);
+    setResult(null);
+
+    try {
+      const cleanup = await api.resumeJob(
+        job.job_id,
+        (statusUpdate) => {
+          setStatus(statusUpdate);
+        },
+        (analysisResult) => {
+          setResult(analysisResult);
+          saveToHistory(analysisResult);
+          setLoading(false);
+          setStatus(null);
+        },
+        (errorMessage) => {
+          setError(errorMessage);
+          setLoading(false);
+          setStatus(null);
+        }
+      );
+      cleanupRef.current = cleanup;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to resume analysis');
+      setLoading(false);
+      setStatus(null);
+    }
+  };
+
+  const handleDismissResume = () => {
+    setShowResumeDialog(false);
+    // Clear all in-progress jobs
+    inProgressJobs.forEach(job => storage.removeInProgressJob(job.job_id));
+    setInProgressJobs([]);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -103,6 +156,38 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-amber-50">
+      {/* Resume Dialog */}
+      {showResumeDialog && inProgressJobs.length > 0 && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold mb-4 text-gray-900">Resume Analysis?</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              You have {inProgressJobs.length} unfinished {inProgressJobs.length === 1 ? 'analysis' : 'analyses'}:
+            </p>
+            <div className="space-y-2 mb-4">
+              {inProgressJobs.map(job => (
+                <button
+                  key={job.job_id}
+                  onClick={() => handleResumeJob(job)}
+                  className="w-full text-left px-4 py-3 bg-orange-50 rounded-lg hover:bg-orange-100 border border-orange-200 transition-colors"
+                >
+                  <div className="font-medium text-gray-900">{job.ticker}</div>
+                  <div className="text-xs text-gray-500">
+                    Started {new Date(job.started_at).toLocaleString()}
+                  </div>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={handleDismissResume}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* History Panel */}
       <HistoryPanel 
         isOpen={historyOpen}
