@@ -104,7 +104,7 @@ WebSocket Stream → Display Report
 ## Limitations
 
 - Works best with earnings from the last 3 months (yfinance limitation)
-- Finnhub free tier limited to US stocks (perfect for our use case)
+- Finnhub free tier limited to US stocks (works well for our use case)
 - Reddit data quality varies by ticker popularity (NVDA works well, obscure stocks may have limited discussion)
 - In-memory caching (results lost on server restart; would use Redis for production)
 - Reddit API free tier has rate limits (60 requests/min)
@@ -120,3 +120,4 @@ If I had more time, I would:
 - Add more data sources (Twitter/X, earnings call transcripts, etc.)
 - PDF export functionality
 - Daily report functionality
+- Markdown formatting for results
