@@ -16,6 +16,30 @@ import logging
 import requests
 
 from models import RedditAnalysis, InsightReport
+from constants import (
+    Volatility,
+    MAX_REDDIT_SEARCH_LIMIT,
+    MIN_POST_SCORE,
+    MIN_COMMENT_SCORE,
+    MIN_COMMENT_LENGTH,
+    MAX_TEXT_LENGTH,
+    MAX_SUBMISSIONS_FOR_COMMENTS,
+    MAX_COMMENTS_PER_SUBMISSION,
+    MAX_TOTAL_POSTS,
+    REDDIT_SEARCH_TIME_FILTER,
+    MAX_NEWS_ARTICLES,
+    MAX_NEWS_DESCRIPTION_LENGTH,
+    NEWS_API_TIMEOUT,
+    MAX_REDDIT_POSTS_FOR_LLM,
+    LLM_MODEL,
+    LLM_REDDIT_ANALYSIS_MAX_TOKENS,
+    LLM_INSIGHT_REPORT_MAX_TOKENS,
+    HIGH_VOLATILITY_THRESHOLD,
+    MEDIUM_VOLATILITY_THRESHOLD,
+    ANNUALIZATION_FACTOR,
+    DEFAULT_EARNINGS_DAYS_AGO,
+    MAX_GUIDANCE_LENGTH,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -104,7 +128,7 @@ def get_earnings_metadata(ticker: str) -> Dict:
         if earnings_dates is None or len(earnings_dates) == 0:
             logger.warning("No earnings dates found, using alternative method...")
             # Fallback: assume last quarterly earnings ~90 days ago
-            last_earnings_date = datetime.now() - timedelta(days=90)
+            last_earnings_date = datetime.now() - timedelta(days=DEFAULT_EARNINGS_DAYS_AGO)
         else:
             # Get most recent earnings date
             # Convert to timezone-naive datetime by replacing tzinfo with None
@@ -134,7 +158,7 @@ def get_earnings_metadata(ticker: str) -> Dict:
             'eps_actual': eps_actual,
             'eps_estimate': eps_estimate,
             'revenue': revenue,
-            'guidance': info.get('longBusinessSummary', 'No guidance available')[:500]
+            'guidance': info.get('longBusinessSummary', 'No guidance available')[:MAX_GUIDANCE_LENGTH]
         }
         
         logger.info(f"Last earnings: {metadata['date']}")
@@ -206,13 +230,21 @@ def analyze_price_performance(ticker: str, earnings_date: str, sector: str) -> D
         sector_return = ((sector_data['Close'].iloc[-1] / sector_data['Close'].iloc[0]) - 1) * 100
         
         # Calculate volatility (annualized)
-        stock_volatility = stock_data['Close'].pct_change().std() * (252 ** 0.5) * 100
+        stock_volatility = stock_data['Close'].pct_change().std() * (ANNUALIZATION_FACTOR ** 0.5) * 100
         
         # Calculate max drawdown
         cumulative = (1 + stock_data['Close'].pct_change()).cumprod()
         running_max = cumulative.expanding().max()
         drawdown = ((cumulative - running_max) / running_max) * 100
         max_drawdown = drawdown.min()
+        
+        # Determine volatility level
+        if stock_volatility > HIGH_VOLATILITY_THRESHOLD:
+            volatility_level = Volatility.HIGH.value
+        elif stock_volatility > MEDIUM_VOLATILITY_THRESHOLD:
+            volatility_level = Volatility.MEDIUM.value
+        else:
+            volatility_level = Volatility.LOW.value
         
         performance = {
             'since_earnings': f"{stock_return:.1f}%",
@@ -221,7 +253,7 @@ def analyze_price_performance(ticker: str, earnings_date: str, sector: str) -> D
             'sector_etf': sector_etf_ticker,
             'max_drawdown': f"{max_drawdown:.1f}%",
             'current_price': f"${stock_data['Close'].iloc[-1]:.2f}",
-            'volatility': 'high' if stock_volatility > 40 else 'medium' if stock_volatility > 25 else 'low',
+            'volatility': volatility_level,
             'volatility_pct': f"{stock_volatility:.1f}%"
         }
         
@@ -274,7 +306,7 @@ def collect_news_articles(ticker: str, company_name: str, earnings_date: str) ->
             'token': api_key
         }
         
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, timeout=NEWS_API_TIMEOUT)
         response.raise_for_status()
         
         data = response.json()
@@ -300,11 +332,11 @@ def collect_news_articles(ticker: str, company_name: str, earnings_date: str) ->
             
             articles.append({
                 'title': headline,
-                'description': summary[:500],  # Limit summary length
+                'description': summary[:MAX_NEWS_DESCRIPTION_LENGTH],
                 'source': item.get('source', 'Unknown'),
                 'date': article_date.strftime('%Y-%m-%d'),
                 'url': item.get('url', ''),
-                'author': item.get('source', 'Unknown')  # Finnhub doesn't provide author, use source
+                'author': item.get('source', 'Unknown')
             })
         
         logger.info(f"Found {len(articles)} news articles for {ticker}")
@@ -342,7 +374,7 @@ async def _load_submission_comments(submission) -> None:
     return comments_forest
 
 
-async def _extract_quality_comments(submission, subreddit_name: str, max_comments: int = 5) -> List[Dict]:
+async def _extract_quality_comments(submission, subreddit_name: str, max_comments: int = MAX_COMMENTS_PER_SUBMISSION) -> List[Dict]:
     """
     Extract quality comments from a submission using BFS traversal.
     
@@ -380,7 +412,7 @@ async def _extract_quality_comments(submission, subreddit_name: str, max_comment
         created_utc = getattr(comment, "created_utc", None)
         
         # Filter low-quality comments
-        if not body or score < 5 or len(body) <= 100:
+        if not body or score < MIN_COMMENT_SCORE or len(body) <= MIN_COMMENT_LENGTH:
             # Still queue up replies for potential higher-quality nested comments
             replies_forest = getattr(comment, "replies", None)
             if replies_forest and getattr(replies_forest, "_comments", None):
@@ -392,7 +424,7 @@ async def _extract_quality_comments(submission, subreddit_name: str, max_comment
             'type': 'comment',
             'date': datetime.fromtimestamp(created_utc).strftime('%Y-%m-%d') if created_utc else 'unknown',
             'title': f"Comment on: {submission.title[:50]}...",
-            'text': body[:1000],
+            'text': body[:MAX_TEXT_LENGTH],
             'score': score,
             'url': f"https://reddit.com{submission.permalink}",
             'subreddit': subreddit_name
@@ -457,7 +489,7 @@ async def collect_reddit_data(ticker: str, company_name: str, earnings_date: str
             for query in queries:
                 try:
                     # Search posts
-                    search_results = subreddit.search(query, time_filter='month', limit=50)
+                    search_results = subreddit.search(query, time_filter=REDDIT_SEARCH_TIME_FILTER, limit=MAX_REDDIT_SEARCH_LIMIT)
                     
                     if search_results is None:
                         logger.warning(f"No search results for '{query}' in {subreddit_name}")
@@ -469,7 +501,7 @@ async def collect_reddit_data(ticker: str, company_name: str, earnings_date: str
                             continue
                         
                         # Filter by score
-                        if submission.score < 10:
+                        if submission.score < MIN_POST_SCORE:
                             continue
                         
                         # Skip automod and low-quality posts
@@ -480,7 +512,7 @@ async def collect_reddit_data(ticker: str, company_name: str, earnings_date: str
                             'type': 'submission',
                             'date': datetime.fromtimestamp(submission.created_utc).strftime('%Y-%m-%d'),
                             'title': submission.title,
-                            'text': submission.selftext[:1000],
+                            'text': submission.selftext[:MAX_TEXT_LENGTH],
                             'score': submission.score,
                             'url': f"https://reddit.com{submission.permalink}",
                             'subreddit': subreddit_name
@@ -496,17 +528,17 @@ async def collect_reddit_data(ticker: str, company_name: str, earnings_date: str
         # Now process comments only for top submissions (by score)
         # Sort submissions by score and take top 30 to extract comments from
         submissions_to_process.sort(key=lambda x: x[0].score, reverse=True)
-        top_submissions = submissions_to_process[:30]
+        top_submissions = submissions_to_process[:MAX_SUBMISSIONS_FOR_COMMENTS]
         
         logger.info(f"Processing comments from top {len(top_submissions)} submissions...")
         
         for submission, subreddit_name in top_submissions:
-            comments = await _extract_quality_comments(submission, subreddit_name, max_comments=5)
+            comments = await _extract_quality_comments(submission, subreddit_name, max_comments=MAX_COMMENTS_PER_SUBMISSION)
             all_posts.extend(comments)
         
         # Sort by score and limit
         all_posts.sort(key=lambda x: x['score'], reverse=True)
-        all_posts = all_posts[:100]
+        all_posts = all_posts[:MAX_TOTAL_POSTS]
         
         logger.info(f"Collected {len(all_posts)} Reddit posts/comments")
         
@@ -562,8 +594,8 @@ def analyze_reddit_with_llm(reddit_posts: List[Dict], ticker: str, earnings_date
         posts_text = "\n\n".join([
             f"[{post['date']}] [{post['subreddit']}] Score: {post['score']}\n"
             f"Title: {post['title']}\n"
-            f"Content: {post['text'][:500]}..."
-            for post in reddit_posts[:50]  # Limit to top 50 to fit context
+            f"Content: {post['text'][:MAX_NEWS_DESCRIPTION_LENGTH]}..."
+            for post in reddit_posts[:MAX_REDDIT_POSTS_FOR_LLM]
         ])
         
         prompt = f"""You are analyzing Reddit discussion about {ticker} since their last earnings on {earnings_date}.
@@ -588,8 +620,8 @@ Focus on:
 Output your analysis in the structured format provided."""
 
         response = client.messages.create(
-            model="claude-sonnet-4-5-20250929",
-            max_tokens=4000,
+            model=LLM_MODEL,
+            max_tokens=LLM_REDDIT_ANALYSIS_MAX_TOKENS,
             messages=[{"role": "user", "content": prompt}],
             response_model=RedditAnalysis
         )
@@ -650,7 +682,7 @@ def generate_insight_report(
         if news_articles:
             # Sort by date (most recent first) and take top 30
             sorted_news = sorted(news_articles, key=lambda x: x.get('date', ''), reverse=True)
-            context['news_articles'] = sorted_news[:30]
+            context['news_articles'] = sorted_news[:MAX_NEWS_ARTICLES]
             context['news_articles_count'] = len(news_articles)  # Include total count for context
         
         context_json = json.dumps(context, indent=2, default=str)
@@ -659,7 +691,7 @@ def generate_insight_report(
         news_instruction = ""
         if news_articles and len(news_articles) > 0:
             news_count = len(news_articles)
-            included_count = min(30, news_count)
+            included_count = min(MAX_NEWS_ARTICLES, news_count)
             news_instruction = f"""
 IMPORTANT: You have access to {included_count} of the most recent news articles (out of {news_count} total) published since earnings.
 Use these to:
@@ -704,8 +736,8 @@ Output 4 sections:
 Also provide a punchy headline and timeline of key events."""
 
         response = client.messages.create(
-            model="claude-sonnet-4-5-20250929",
-            max_tokens=16000,  # Increased for comprehensive reports with news analysis
+            model=LLM_MODEL,
+            max_tokens=LLM_INSIGHT_REPORT_MAX_TOKENS,
             messages=[{"role": "user", "content": prompt}],
             response_model=InsightReport
         )

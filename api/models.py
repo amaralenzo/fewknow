@@ -5,6 +5,7 @@ Defines structured data schemas for LLM outputs and API responses.
 
 from typing import List, Dict
 from pydantic import BaseModel
+from constants import Sentiment, Confidence
 
 
 # ============================================================================
@@ -14,8 +15,8 @@ from pydantic import BaseModel
 class SentimentPeriod(BaseModel):
     """Sentiment analysis for a time period"""
     period: str
-    sentiment: str  # bullish, bearish, mixed
-    confidence: str  # high, medium, low
+    sentiment: Sentiment
+    confidence: Confidence
     key_drivers: List[str]
 
 
@@ -23,7 +24,7 @@ class Theme(BaseModel):
     """Recurring theme from Reddit discussions"""
     theme: str
     mention_count: int
-    sentiment: str
+    sentiment: Sentiment
     example_quotes: List[str]
 
 
