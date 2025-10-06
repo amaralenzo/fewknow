@@ -50,8 +50,12 @@ app.add_middleware(
 )
 
 # In-memory storage for analysis results (in production, use Redis or database)
+# Each entry: {job_id: {"result": data, "expires_at": datetime}}
 analysis_cache = {}
 analysis_status = {}
+
+# Cache expiration settings
+CACHE_TTL_HOURS = 24  # Results expire after 24 hours
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -105,6 +109,26 @@ class AnalysisResponse(BaseModel):
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
+
+def cleanup_expired_cache():
+    """Remove expired entries from cache"""
+    now = datetime.now()
+    expired_jobs = []
+    
+    # Find expired entries
+    for job_id, entry in analysis_cache.items():
+        if isinstance(entry, dict) and "expires_at" in entry:
+            if entry["expires_at"] < now:
+                expired_jobs.append(job_id)
+    
+    # Remove expired entries
+    for job_id in expired_jobs:
+        logger.info(f"Removing expired cache entry for job {job_id}")
+        analysis_cache.pop(job_id, None)
+        analysis_status.pop(job_id, None)
+    
+    if expired_jobs:
+        logger.info(f"Cleaned up {len(expired_jobs)} expired cache entries")
 
 async def update_status(job_id: str, status: str, progress: str, message: str = None):
     """Update analysis status and send to WebSocket if connected"""
@@ -220,7 +244,14 @@ async def run_analysis(job_id: str, ticker: str):
         
         # Complete
         result["status"] = "completed"
-        analysis_cache[job_id] = result
+        
+        # Store with expiration timestamp
+        from datetime import timedelta
+        analysis_cache[job_id] = {
+            "result": result,
+            "expires_at": datetime.now() + timedelta(hours=CACHE_TTL_HOURS)
+        }
+        
         await update_status(job_id, "completed", "100%", "Analysis complete!")
         
         # Send final result via WebSocket
@@ -240,7 +271,14 @@ async def run_analysis(job_id: str, ticker: str):
             "ticker": ticker,
             "error": error_msg
         }
-        analysis_cache[job_id] = result
+        
+        # Store failed results with expiration (shorter TTL for failures)
+        from datetime import timedelta
+        analysis_cache[job_id] = {
+            "result": result,
+            "expires_at": datetime.now() + timedelta(hours=1)  # Failed results expire faster
+        }
+        
         await update_status(job_id, "failed", "0%", f"Error: {error_msg}")
         
         # Send error via WebSocket
@@ -272,6 +310,9 @@ async def start_analysis(request: AnalysisRequest, background_tasks: BackgroundT
     
     if not ticker:
         raise HTTPException(status_code=400, detail="Ticker is required")
+    
+    # Cleanup expired cache entries before starting new job
+    cleanup_expired_cache()
     
     # Generate unique job ID
     job_id = str(uuid.uuid4())
@@ -306,9 +347,22 @@ async def get_result(job_id: str):
     Get the full results of a completed analysis.
     """
     if job_id not in analysis_cache:
-        raise HTTPException(status_code=404, detail="Results not found")
+        raise HTTPException(status_code=404, detail="Results not found or expired")
     
-    result = analysis_cache[job_id]
+    entry = analysis_cache[job_id]
+    
+    # Check if expired
+    if isinstance(entry, dict) and "expires_at" in entry:
+        if entry["expires_at"] < datetime.now():
+            # Remove expired entry
+            analysis_cache.pop(job_id, None)
+            analysis_status.pop(job_id, None)
+            raise HTTPException(status_code=404, detail="Results expired")
+        result = entry["result"]
+    else:
+        # Legacy format (backward compatibility)
+        result = entry
+    
     return AnalysisResponse(**result)
 
 @app.get("/api/validate/{ticker}")
@@ -346,9 +400,12 @@ async def websocket_endpoint(websocket: WebSocket, job_id: str):
         
         # Send result if already completed
         if job_id in analysis_cache:
+            entry = analysis_cache[job_id]
+            # Extract result from new format or use legacy format
+            result = entry["result"] if isinstance(entry, dict) and "result" in entry else entry
             await websocket.send_json({
                 "type": "result",
-                "data": analysis_cache[job_id]
+                "data": result
             })
         
         # Keep connection alive and handle any client messages
