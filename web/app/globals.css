@@ -57,3 +57,104 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Markdown content styling for insight reports */
+@layer components {
+  .prose {
+    @apply text-gray-700;
+    line-height: 1.75;
+  }
+
+  .prose strong {
+    @apply text-gray-900 font-semibold;
+  }
+
+  .prose em {
+    @apply text-gray-600 italic;
+  }
+
+  .prose ul {
+    @apply list-disc list-inside space-y-2 my-4;
+  }
+
+  .prose ol {
+    @apply list-decimal list-inside space-y-2 my-4;
+  }
+
+  .prose li {
+    @apply text-gray-700;
+  }
+
+  .prose li > p {
+    @apply inline;
+  }
+
+  .prose blockquote {
+    @apply border-l-4 border-orange-500 pl-4 italic text-gray-600 my-4 py-1;
+  }
+
+  .prose code {
+    @apply bg-gray-100 text-orange-600 px-1.5 py-0.5 rounded text-sm font-mono;
+  }
+
+  .prose pre {
+    @apply bg-gray-100 p-4 rounded my-4 overflow-x-auto;
+  }
+
+  .prose pre code {
+    @apply bg-transparent p-0;
+  }
+
+  .prose h3 {
+    @apply text-lg font-semibold text-gray-900 mt-6 mb-3;
+  }
+
+  .prose h4 {
+    @apply text-base font-semibold text-gray-900 mt-4 mb-2;
+  }
+
+  .prose p {
+    @apply mb-4;
+  }
+
+  .prose a {
+    @apply text-orange-600 hover:text-orange-700 underline decoration-orange-300 hover:decoration-orange-500 transition-colors cursor-pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .prose a:hover {
+    @apply text-orange-700;
+    text-decoration: underline;
+  }
+
+  .prose a:visited {
+    @apply text-orange-700;
+  }
+
+  /* Ensure lists maintain proper spacing */
+  .prose ul ul,
+  .prose ul ol,
+  .prose ol ul,
+  .prose ol ol {
+    @apply my-2 ml-4;
+  }
+
+  /* Table styling if needed */
+  .prose table {
+    @apply w-full border-collapse my-4;
+  }
+
+  .prose th {
+    @apply bg-gray-100 border border-gray-300 px-4 py-2 text-left font-semibold text-gray-900;
+  }
+
+  .prose td {
+    @apply border border-gray-300 px-4 py-2;
+  }
+
+  /* Horizontal rule */
+  .prose hr {
+    @apply my-6 border-gray-300;
+  }
+}

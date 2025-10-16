@@ -752,14 +752,18 @@ def analyze_reddit_with_llm(reddit_posts: List[Dict], ticker: str, earnings_date
         raise ValueError("ANTHROPIC_API_KEY not found in environment variables")
     
     try:
-        # Initialize Anthropic client with instructor
-        client = instructor.from_anthropic(Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY')))
+        # Initialize Anthropic client with instructor (using JSON mode for reliability)
+        client = instructor.from_anthropic(
+            Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY')),
+            mode=instructor.Mode.ANTHROPIC_JSON
+        )
         
-        # Prepare posts for context
+        # Prepare posts for context (include URLs for linking)
         posts_text = "\n\n".join([
             f"[{post['date']}] [{post['subreddit']}] Score: {post['score']}\n"
             f"Title: {post['title']}\n"
-            f"Content: {post['text'][:MAX_NEWS_DESCRIPTION_LENGTH]}..."
+            f"Content: {post['text'][:MAX_NEWS_DESCRIPTION_LENGTH]}...\n"
+            f"URL: {post['url']}"
             for post in reddit_posts[:MAX_REDDIT_POSTS_FOR_LLM]
         ])
         
@@ -773,14 +777,21 @@ Extract the following:
 1. Sentiment trajectory over time (weekly breakdown if possible)
 2. Top 5 recurring themes or concerns mentioned
 3. 3-5 most insightful posts (with dates and brief summary)
-4. Contrarian or surprising perspectives
-5. Comparison: what retail is worried about vs what they're optimistic about
+4. 10 notable quotes - actual verbatim quotes (not paraphrased) that are:
+   - Insightful or analytical
+   - Funny or sarcastic (common in WSB)
+   - Contrarian or controversial
+   - Representative of strong community sentiment
+   Include the author, date, subreddit, score, and brief context for each quote
+5. Contrarian or surprising perspectives
+6. Comparison: what retail is worried about vs what they're optimistic about
 
 Focus on:
 - Detecting sarcasm and irony (common in WSB)
 - Grouping similar concerns across different phrasings
 - Identifying temporal patterns (sentiment shifts)
 - Surfacing quality insights over noise
+- Extracting ACTUAL quotes, not summaries or paraphrases
 
 Output your analysis in the structured format provided."""
 
@@ -835,7 +846,10 @@ def generate_insight_report(
         raise ValueError("ANTHROPIC_API_KEY not found in environment variables")
     
     try:
-        client = instructor.from_anthropic(Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY')))
+        client = instructor.from_anthropic(
+            Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY')),
+            mode=instructor.Mode.ANTHROPIC_JSON
+        )
         
         # Prepare structured context
         context = {
@@ -854,9 +868,22 @@ def generate_insight_report(
             context['news_articles'] = sorted_news[:MAX_NEWS_ARTICLES]
             context['news_articles_count'] = len(news_articles)  # Include total count for context
         
+        # Add top Reddit posts with URLs for linking in narrative
+        if top_reddit_posts:
+            context['top_reddit_posts'] = [
+                {
+                    'title': post.title,
+                    'date': post.date,
+                    'url': post.url,
+                    'score': post.score,
+                    'subreddit': post.subreddit
+                }
+                for post in top_reddit_posts[:5]  # Include top 5 for linking
+            ]
+        
         context_json = json.dumps(context, indent=2, default=str)
         
-        # Build prompt with conditional news section
+        # Build prompt with conditional news and Reddit sections
         news_instruction = ""
         if news_articles and len(news_articles) > 0:
             news_count = len(news_articles)
@@ -871,13 +898,41 @@ Use these to:
 - Build a timeline of significant events
 """
         
-        prompt = f"""You are a financial analyst writing an insight report for {ticker}.
+        reddit_instruction = ""
+        if top_reddit_posts:
+            reddit_instruction = f"""
+REDDIT POST URLs: {len(top_reddit_posts)} specific post URLs are in context under 'top_reddit_posts'.
+- ONLY link when referencing a specific post: [this r/wallstreetbets post](actual_url_from_context)
+- NEVER create generic subreddit URLs like https://reddit.com/r/stocks
+- When discussing general sentiment without a specific post, do NOT use a link
+"""
+        
+        # System message for formatting instructions (separate from analysis task)
+        system_message = """You are a financial analyst writing insight reports. Use markdown formatting:
 
-Synthesize the following data to answer: "what actually happened since earnings?"
+**Bold**: Key metrics (**15.2%**), dates (**Oct 15**), critical insights
+*Italics*: Emphasis (*surprisingly*), interpretation (*may have overreacted*)
+Bullet lists: Break up information for scannability
+Blockquotes (>): Direct quotes - NO extra quote marks
+Links: [text](url) - ONLY for specific sources in context, NOT generic URLs
+Subheadings (###): Organize sections
+NO backticks: Use bold/italics instead
+
+Output structure:
+1. The Story (2-3 paragraphs)
+2. Retail Perspective
+3. The Gap
+4. What's Next
++ Headline and timeline
+
+Sources field: plain text only (no markdown links)."""
+        
+        prompt = f"""Synthesize the following data to answer: "what actually happened since earnings for {ticker}?"
 
 CONTEXT:
 {context_json}
 {news_instruction}
+{reddit_instruction}
 
 Focus on:
 1. Expectation vs reality (what company said vs what happened)
@@ -893,20 +948,12 @@ Requirements:
 - Identify surprises or contrarian signals
 - Avoid generic statements
 - Be specific about causality
-- Make it insightful - surface things not obvious from just looking at Yahoo Finance
-- Structure lists with simple dashes or numbers
-
-Output 4 sections:
-1. The Story (narrative of what happened - 2-3 paragraphs)
-2. Retail Perspective (what Reddit reveals that you wouldn't know otherwise)
-3. The Gap (disconnects between official narrative, news events, and reality)
-4. What's Next (forward-looking perspective on what to watch)
-
-Also provide a punchy headline and timeline of key events."""
+- Make it insightful - surface things not obvious from just looking at Yahoo Finance"""
 
         response = client.messages.create(
             model=LLM_MODEL,
             max_tokens=LLM_INSIGHT_REPORT_MAX_TOKENS,
+            system=system_message,
             messages=[{"role": "user", "content": prompt}],
             response_model=InsightReport
         )

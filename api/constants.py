@@ -46,7 +46,7 @@ MAX_TOTAL_POSTS = 100  # Maximum total posts/comments to return
 # NEWS DATA COLLECTION
 # ============================================================================
 
-MAX_NEWS_ARTICLES = 30  # Maximum news articles to include in LLM context
+MAX_NEWS_ARTICLES = 15  # Maximum news articles to include in LLM context
 MAX_NEWS_DESCRIPTION_LENGTH = 500  # Truncate news descriptions to this length
 NEWS_API_TIMEOUT = 10  # Timeout in seconds for news API requests
 

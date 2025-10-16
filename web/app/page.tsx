@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { api, AnalysisStatus, AnalysisResult, InProgressJob, storage } from "@/lib/api";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { RedditPostCard } from "@/components/RedditPostCard";
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 export default function Home() {
   const [ticker, setTicker] = useState("");
@@ -371,9 +373,20 @@ export default function Home() {
                   <CardTitle className="text-gray-900">📖 The Story</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-gray-700 whitespace-pre-line leading-relaxed">
-                    {result.insight_report.story}
-                  </p>
+                  <div className="prose prose-gray max-w-none">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        a: ({ node, href, children, ...props }) => (
+                          <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+                            {children}
+                          </a>
+                        ),
+                      }}
+                    >
+                      {result.insight_report.story}
+                    </ReactMarkdown>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -383,9 +396,20 @@ export default function Home() {
                   <CardTitle className="text-gray-900">💬 Retail Perspective</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-gray-700 whitespace-pre-line leading-relaxed">
-                    {result.insight_report.retail_perspective}
-                  </p>
+                  <div className="prose prose-gray max-w-none">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        a: ({ node, href, children, ...props }) => (
+                          <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+                            {children}
+                          </a>
+                        ),
+                      }}
+                    >
+                      {result.insight_report.retail_perspective}
+                    </ReactMarkdown>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -414,9 +438,20 @@ export default function Home() {
                   <CardTitle className="text-gray-900">🔍 The Gap</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-gray-700 whitespace-pre-line leading-relaxed">
-                    {result.insight_report.the_gap}
-                  </p>
+                  <div className="prose prose-gray max-w-none">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        a: ({ node, href, children, ...props }) => (
+                          <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+                            {children}
+                          </a>
+                        ),
+                      }}
+                    >
+                      {result.insight_report.the_gap}
+                    </ReactMarkdown>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -426,9 +461,20 @@ export default function Home() {
                   <CardTitle className="text-gray-900">🔮 What's Next</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-gray-700 whitespace-pre-line leading-relaxed">
-                    {result.insight_report.whats_next}
-                  </p>
+                  <div className="prose prose-gray max-w-none">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        a: ({ node, href, children, ...props }) => (
+                          <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+                            {children}
+                          </a>
+                        ),
+                      }}
+                    >
+                      {result.insight_report.whats_next}
+                    </ReactMarkdown>
+                  </div>
                 </CardContent>
               </Card>
 

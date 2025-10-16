@@ -35,11 +35,26 @@ class InsightfulPost(BaseModel):
     score: int
 
 
+class NotableQuote(BaseModel):
+    """Notable quote from Reddit discussion"""
+    quote: str
+    author: str
+    date: str
+    subreddit: str
+    score: int
+    context: str = Field(description="Brief context explaining why this quote is notable")
+
+
 class RedditAnalysis(BaseModel):
     """Output from LLM Call 1 - Reddit analysis"""
     sentiment_timeline: List[SentimentPeriod]
-    top_themes: List[Theme]
+    top_themes: List[Theme] = Field(
+        description='List of Theme objects (NOT a JSON string). Each theme must be a properly structured Theme object with theme, mention_count, sentiment, and example_quotes fields.'
+    )
     notable_insights: List[InsightfulPost]
+    notable_quotes: List[NotableQuote] = Field(
+        description='List of 10 notable quotes from Reddit discussions. These should be actual verbatim quotes (not paraphrased) that are insightful, contrarian, funny, or particularly representative of community sentiment.'
+    )
     contrarian_takes: List[str]
     worry_vs_optimism: Dict[str, List[str]] = Field(
         description='Dictionary with exactly two keys: "worries" and "optimism", each containing a list of string statements. Must be a valid JSON object, not a string.'
