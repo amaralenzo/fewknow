@@ -34,6 +34,27 @@ export interface Event {
   source: string;
 }
 
+export interface RedditComment {
+  author: string;
+  text: string;
+  score: number;
+  date: string;
+  url: string;
+  image_urls: string[];
+}
+
+export interface RedditPost {
+  subreddit: string;
+  author: string;
+  title: string;
+  text: string;
+  score: number;
+  date: string;
+  url: string;
+  comments: RedditComment[];
+  image_urls: string[];
+}
+
 export interface InsightReport {
   headline: string;
   story: string;
@@ -42,6 +63,7 @@ export interface InsightReport {
   whats_next: string;
   key_dates: Event[];
   sources: string[];
+  top_reddit_posts?: RedditPost[];
 }
 
 export interface AnalysisStatus {

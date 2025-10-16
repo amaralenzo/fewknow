@@ -46,6 +46,29 @@ class RedditAnalysis(BaseModel):
     overall_summary: str
 
 
+class RedditComment(BaseModel):
+    """Individual Reddit comment"""
+    author: str
+    text: str
+    score: int
+    date: str
+    url: str
+    image_urls: List[str] = []
+
+
+class RedditPost(BaseModel):
+    """Reddit post with top comments"""
+    subreddit: str
+    author: str
+    title: str
+    text: str
+    score: int
+    date: str
+    url: str
+    comments: List[RedditComment]
+    image_urls: List[str] = []
+
+
 # ============================================================================
 # INSIGHT REPORT MODELS
 # ============================================================================
@@ -76,3 +99,4 @@ class InsightReport(BaseModel):
     whats_next: str
     key_dates: List[Event]
     sources: List[str]
+    top_reddit_posts: List[RedditPost] = []

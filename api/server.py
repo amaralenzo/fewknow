@@ -198,7 +198,7 @@ async def run_analysis(job_id: str, ticker: str):
         
         # Step 5: Collect Reddit data
         await update_status(job_id, "processing", "60%", "Collecting Reddit discussions...")
-        reddit_posts = await collect_reddit_data(
+        reddit_posts, top_reddit_posts = await collect_reddit_data(
             ticker,
             company_info['name'],
             earnings_metadata['date']
@@ -263,7 +263,8 @@ async def run_analysis(job_id: str, ticker: str):
                 price_performance,
                 reddit_analysis,
                 ticker,
-                news_articles=news_articles if news_articles else None
+                news_articles=news_articles if news_articles else None,
+                top_reddit_posts=top_reddit_posts
             )
             result["insight_report"] = insight_report.model_dump()
         

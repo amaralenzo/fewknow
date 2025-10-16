@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { api, AnalysisStatus, AnalysisResult, InProgressJob, storage } from "@/lib/api";
 import { HistoryPanel } from "@/components/HistoryPanel";
+import { RedditPostCard } from "@/components/RedditPostCard";
 
 export default function Home() {
   const [ticker, setTicker] = useState("");
@@ -387,6 +388,25 @@ export default function Home() {
                   </p>
                 </CardContent>
               </Card>
+
+              {/* Top Reddit Posts */}
+              {result.insight_report.top_reddit_posts && result.insight_report.top_reddit_posts.length > 0 && (
+                <Card className="bg-white border-gray-200">
+                  <CardHeader>
+                    <CardTitle className="text-gray-900">🗣️ Top Reddit Discussions</CardTitle>
+                    <p className="text-sm text-gray-600 mt-2">
+                      The 5 most upvoted posts from our search, along with their top comments
+                    </p>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {result.insight_report.top_reddit_posts.map((post, idx) => (
+                        <RedditPostCard key={idx} post={post} />
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* The Gap */}
               <Card className="bg-white border-gray-200">

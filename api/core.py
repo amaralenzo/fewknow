@@ -4,7 +4,7 @@ Core analysis logic for FewKnow.
 
 import os
 from datetime import datetime, timedelta
-from typing import List, Dict
+from typing import List, Dict, Tuple
 from pathlib import Path
 import yfinance as yf
 import asyncpraw
@@ -15,7 +15,7 @@ import json
 import logging
 import requests
 
-from models import RedditAnalysis, InsightReport
+from models import RedditAnalysis, InsightReport, RedditPost, RedditComment
 from constants import (
     Volatility,
     MAX_REDDIT_SEARCH_LIMIT,
@@ -349,6 +349,113 @@ def collect_news_articles(ticker: str, company_name: str, earnings_date: str) ->
         return []
 
 
+def _extract_image_url_from_text(text: str) -> List[str]:
+    """
+    Extract image URLs from text content (comments often have image links).
+    
+    Args:
+        text: Text content to search for image URLs
+        
+    Returns:
+        List of image URLs found in text
+    """
+    if not text:
+        return []
+    
+    import re
+    
+    image_urls = []
+    
+    # Look for preview.redd.it, i.redd.it, or other Reddit image URLs
+    image_patterns = [
+        r'(https?://preview\.redd\.it/[^\s\)]+\.(?:jpg|jpeg|png|gif|webp)[^\s\)]*)',
+        r'(https?://i\.redd\.it/[^\s\)]+\.(?:jpg|jpeg|png|gif|webp)[^\s\)]*)',
+        r'(https?://i\.imgur\.com/[^\s\)]+\.(?:jpg|jpeg|png|gif|webp)[^\s\)]*)',
+    ]
+    
+    for pattern in image_patterns:
+        matches = re.finditer(pattern, text, re.IGNORECASE)
+        for match in matches:
+            url = match.group(1)
+            if url not in image_urls:  # Avoid duplicates
+                image_urls.append(url)
+    
+    return image_urls
+
+
+def _extract_submission_image_urls(submission) -> List[str]:
+    """
+    Extract all image URLs from a Reddit submission (including gallery posts).
+    
+    Args:
+        submission: Reddit submission object
+        
+    Returns:
+        List of image URLs found in submission
+    """
+    image_urls = []
+    
+    try:
+        import html
+        
+        # Check if it's a gallery post
+        gallery_data = getattr(submission, 'gallery_data', None)
+        if gallery_data and isinstance(gallery_data, dict):
+            items = gallery_data.get('items', [])
+            media_metadata = getattr(submission, 'media_metadata', {})
+            
+            for item in items:
+                media_id = item.get('media_id')
+                if media_id and media_id in media_metadata:
+                    media_info = media_metadata[media_id]
+                    # Try to get the highest quality image
+                    if 's' in media_info:
+                        image_url = media_info['s'].get('u') or media_info['s'].get('gif')
+                        if image_url:
+                            image_urls.append(html.unescape(image_url))
+            
+            if image_urls:
+                return image_urls
+        
+        # Check if it's a direct image link
+        url = getattr(submission, 'url', None)
+        if url:
+            # Check if URL ends with image extension
+            if any(url.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']):
+                image_urls.append(url)
+                return image_urls
+            
+            # Check if it's an i.redd.it or preview.redd.it link
+            if 'i.redd.it' in url or 'preview.redd.it' in url:
+                image_urls.append(url)
+                return image_urls
+        
+        # Check if submission has preview images
+        preview = getattr(submission, 'preview', None)
+        if preview and isinstance(preview, dict):
+            images = preview.get('images', [])
+            if images and len(images) > 0:
+                # Get all images from preview
+                for img_data in images:
+                    source = img_data.get('source', {})
+                    image_url = source.get('url', None)
+                    if image_url:
+                        image_urls.append(html.unescape(image_url))
+                
+                if image_urls:
+                    return image_urls
+        
+        # Check post_hint for image type
+        post_hint = getattr(submission, 'post_hint', None)
+        if post_hint == 'image' and url:
+            image_urls.append(url)
+            
+    except Exception as e:
+        logger.debug(f"Error extracting images from submission: {e}")
+    
+    return image_urls
+
+
 async def _load_submission_comments(submission) -> None:
     """
     Helper to load comments for a submission.
@@ -409,6 +516,8 @@ async def _extract_quality_comments(submission, subreddit_name: str, max_comment
         body = getattr(comment, "body", None)
         score = getattr(comment, "score", 0)
         created_utc = getattr(comment, "created_utc", None)
+        author = getattr(comment, "author", None)
+        author_name = author.name if author else '[deleted]'
         
         # Filter low-quality comments
         if not body or score < MIN_COMMENT_SCORE or len(body) <= MIN_COMMENT_LENGTH:
@@ -426,7 +535,9 @@ async def _extract_quality_comments(submission, subreddit_name: str, max_comment
             'text': body[:MAX_TEXT_LENGTH],
             'score': score,
             'url': f"https://reddit.com{submission.permalink}",
-            'subreddit': subreddit_name
+            'subreddit': subreddit_name,
+            'author': author_name,
+            'image_urls': _extract_image_url_from_text(body)
         }
         quality_comments.append(comment_data)
         
@@ -438,7 +549,7 @@ async def _extract_quality_comments(submission, subreddit_name: str, max_comment
     return quality_comments
 
 
-async def collect_reddit_data(ticker: str, company_name: str, earnings_date: str) -> List[Dict]:
+async def collect_reddit_data(ticker: str, company_name: str, earnings_date: str) -> Tuple[List[Dict], List[RedditPost]]:
     """
     Collect Reddit posts and comments about the ticker.
     
@@ -448,7 +559,7 @@ async def collect_reddit_data(ticker: str, company_name: str, earnings_date: str
         earnings_date: Last earnings date (YYYY-MM-DD format)
         
     Returns:
-        List of Reddit posts/comments
+        Tuple of (all_posts for LLM analysis, top_5_posts_with_comments for display)
         
     Raises:
         ValueError: If Reddit credentials are missing
@@ -548,15 +659,63 @@ async def collect_reddit_data(ticker: str, company_name: str, earnings_date: str
         
         logger.info(f"Collected {len(all_posts)} Reddit posts/comments")
         
+        # Extract top 5 submissions with their top 5 comments
+        # Get only submissions (not comments) from submissions_to_process
+        submissions_only = [(sub, subreddit) for sub, subreddit in submissions_to_process 
+                           if hasattr(sub, 'selftext')]
+        submissions_only.sort(key=lambda x: x[0].score, reverse=True)
+        top_5_submissions = submissions_only[:5]
+        
+        logger.info(f"Extracting top 5 posts with comments for display...")
+        top_posts_structured = []
+        
+        for submission, subreddit_name in top_5_submissions:
+            # Get author name safely
+            author_name = submission.author.name if submission.author else '[deleted]'
+            
+            # Extract top 5 comments for this submission
+            comments_list = await _extract_quality_comments(submission, subreddit_name, max_comments=5)
+            
+            # Convert to RedditComment objects
+            reddit_comments = []
+            for comment_data in comments_list:
+                reddit_comments.append(RedditComment(
+                    author=comment_data.get('author', 'Reddit User'),
+                    text=comment_data['text'],
+                    score=comment_data['score'],
+                    date=comment_data['date'],
+                    url=comment_data['url'],
+                    image_urls=comment_data.get('image_urls', [])
+                ))
+            
+            # Extract image URLs from submission
+            submission_image_urls = _extract_submission_image_urls(submission)
+            
+            # Create RedditPost object
+            reddit_post = RedditPost(
+                subreddit=subreddit_name,
+                author=author_name,
+                title=submission.title,
+                text=submission.selftext if submission.selftext else '[No text content]',
+                score=submission.score,
+                date=datetime.fromtimestamp(submission.created_utc).strftime('%Y-%m-%d'),
+                url=f"https://reddit.com{submission.permalink}",
+                comments=reddit_comments,
+                image_urls=submission_image_urls
+            )
+            top_posts_structured.append(reddit_post)
+        
+        logger.info(f"Extracted {len(top_posts_structured)} top posts for display")
+        
         # Close the Reddit session
         await reddit.close()
         
-        # If no posts found, return empty list instead of raising error
+        # If no posts found, return empty lists instead of raising error
         if not all_posts:
             logger.warning(f"No Reddit posts found for {ticker}")
-            return []
+            return [], []
         
-        return all_posts
+        return all_posts, top_posts_structured
         
     except Exception as e:
         logger.error(f"Error with Reddit API: {e}")
@@ -646,7 +805,8 @@ def generate_insight_report(
     price_performance: Dict,
     reddit_analysis: RedditAnalysis,
     ticker: str,
-    news_articles: List[Dict] = None
+    news_articles: List[Dict] = None,
+    top_reddit_posts: List[RedditPost] = None
 ) -> InsightReport:
     """
     Generate final insight report using LLM.
@@ -658,6 +818,7 @@ def generate_insight_report(
         reddit_analysis: Reddit sentiment analysis
         ticker: Stock ticker symbol
         news_articles: Optional list of news articles from NewsAPI
+        top_reddit_posts: Optional list of top Reddit posts with comments
         
     Returns:
         InsightReport object with final analysis
@@ -747,6 +908,10 @@ Also provide a punchy headline and timeline of key events."""
             messages=[{"role": "user", "content": prompt}],
             response_model=InsightReport
         )
+        
+        # Add top Reddit posts to the report if provided
+        if top_reddit_posts:
+            response.top_reddit_posts = top_reddit_posts
         
         logger.info(f"Insight report generated")
         return response
