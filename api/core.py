@@ -791,7 +791,9 @@ Output your analysis in the structured format provided."""
             response_model=RedditAnalysis
         )
         
-        logger.info(f"Reddit analysis complete")
+        # Log token usage
+        usage = response._raw_response.usage
+        logger.info(f"Reddit analysis complete - Tokens used: {usage.input_tokens} input, {usage.output_tokens} output, {usage.input_tokens + usage.output_tokens} total")
         return response
         
     except Exception as e:
@@ -909,11 +911,14 @@ Also provide a punchy headline and timeline of key events."""
             response_model=InsightReport
         )
         
+        # Log token usage
+        usage = response._raw_response.usage
+        logger.info(f"Insight report generated - Tokens used: {usage.input_tokens} input, {usage.output_tokens} output, {usage.input_tokens + usage.output_tokens} total")
+        
         # Add top Reddit posts to the report if provided
         if top_reddit_posts:
             response.top_reddit_posts = top_reddit_posts
         
-        logger.info(f"Insight report generated")
         return response
         
     except Exception as e:
