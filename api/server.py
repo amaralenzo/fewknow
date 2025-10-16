@@ -163,14 +163,14 @@ async def run_analysis(job_id: str, ticker: str):
             "status": "processing",
             "ticker": ticker
         }
-        
-        # Step 1: Validate ticker
+
+        # Step 1: Validate ticker and get company info
         await update_status(job_id, "processing", "10%", "Validating ticker...")
         company_info = validate_ticker(ticker)
         if not company_info:
-            raise ValueError(f"Invalid ticker: {ticker}")
+            raise ValueError("Could not fetch company info")
         result["company_info"] = company_info
-        
+
         # Step 2: Get earnings metadata
         await update_status(job_id, "processing", "25%", "Fetching earnings data...")
         earnings_metadata = get_earnings_metadata(ticker)
@@ -396,8 +396,12 @@ async def validate_ticker_endpoint(ticker: str):
     Quick validation endpoint to check if a ticker exists.
     """
     ticker = ticker.upper().strip()
-    company_info = validate_ticker(ticker)
-    
+    try:
+        company_info = validate_ticker(ticker)
+    except Exception as e:
+        logger.error(f"Error validating ticker {ticker}: {e}")
+        raise HTTPException(status_code=500, detail="Error validating ticker")
+
     if not company_info:
         raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found")
     
