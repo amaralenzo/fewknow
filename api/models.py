@@ -4,9 +4,8 @@ Defines structured data schemas for LLM outputs and API responses.
 """
 
 from typing import List, Dict
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from constants import Sentiment, Confidence
-
 
 # ============================================================================
 # REDDIT ANALYSIS MODELS
@@ -42,7 +41,9 @@ class RedditAnalysis(BaseModel):
     top_themes: List[Theme]
     notable_insights: List[InsightfulPost]
     contrarian_takes: List[str]
-    worry_vs_optimism: Dict[str, List[str]]
+    worry_vs_optimism: Dict[str, List[str]] = Field(
+        description='Dictionary with exactly two keys: "worries" and "optimism", each containing a list of string statements. Must be a valid JSON object, not a string.'
+    )
     overall_summary: str
 
 
